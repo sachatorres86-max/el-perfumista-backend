@@ -33,6 +33,12 @@ def create_user(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> User:
+    if payload.role != Role.vendedor:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden crear usuarios con rol de vendedor",
+        )
+
     email = payload.email.lower().strip()
     if _email_in_use(db, email):
         raise HTTPException(
@@ -79,11 +85,18 @@ def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No puedes desactivar tu propia cuenta",
             )
-        if "role" in data and data["role"] != Role.admin:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No puedes cambiar tu propio rol de administrador",
-            )
+
+    if "role" in data and data["role"] != user.role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El rol de un usuario no se puede cambiar desde esta vista",
+        )
+
+    if data.get("password") and user.id != current.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo puedes cambiar la contraseña de tu propia cuenta",
+        )
 
     if "email" in data and data["email"] is not None:
         email = str(data["email"]).lower().strip()

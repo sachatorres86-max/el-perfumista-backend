@@ -1,10 +1,7 @@
-import csv
-import io
 from datetime import datetime, time, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -19,6 +16,7 @@ from app.models import (
     Supply,
     User,
 )
+from app.services.report_pdf import build_report_pdf
 from app.services.serializers import serialize_movement
 
 router = APIRouter(prefix="/api/admin/reportes", tags=["admin · reportes"])
@@ -29,6 +27,22 @@ PERIOD_LABELS = {
     "diario": "Hoy",
     "semanal": "Esta semana",
     "mensual": "Este mes",
+}
+
+REPORT_TITLES = {
+    "inventario": "Reporte de inventario",
+    "agotados": "Reporte de productos agotados",
+    "stock_bajo": "Reporte de stock bajo",
+    "movimientos": "Reporte de movimientos",
+    "cotizaciones": "Reporte de cotizaciones",
+}
+
+REPORT_COL_RATIOS = {
+    "inventario": [0.7, 1.0, 2.1, 1.0, 0.65, 0.8, 1.0, 1.1, 0.9],
+    "agotados": [0.7, 1.0, 2.4, 1.0, 0.65, 0.85, 1.0, 0.9, 0.8],
+    "stock_bajo": [0.7, 1.0, 2.3, 1.0, 0.65, 0.8, 1.0, 1.0, 0.85],
+    "movimientos": [1.25, 1.0, 2.0, 0.9, 0.7, 0.75, 1.9, 1.0],
+    "cotizaciones": [0.45, 1.15, 0.8, 0.65, 0.9, 2.0, 0.9, 0.55, 0.9, 0.9, 1.0, 1.1, 1.0],
 }
 
 
@@ -200,21 +214,8 @@ def summary(
     }
 
 
-def _csv_response(rows: list[list], filename: str) -> StreamingResponse:
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    for row in rows:
-        writer.writerow(row)
-    content = ("\ufeff" + output.getvalue()).encode("utf-8")
-    return StreamingResponse(
-        iter([content]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
 @router.get("/export")
-def export_csv(
+def export_pdf(
     tipo: str = Query(
         default="inventario",
         pattern="^(inventario|agotados|stock_bajo|movimientos|cotizaciones)$",
@@ -222,7 +223,7 @@ def export_csv(
     periodo: ReportPeriod = Query(...),
     db: Session = Depends(get_db),
     _: User = Depends(require_staff),
-) -> StreamingResponse:
+) -> Response:
     start, end = _period_bounds(periodo)
 
     if tipo == "movimientos":
@@ -401,5 +402,18 @@ def export_csv(
                     ]
                 )
 
-    filename = f"{tipo}-{periodo}-{datetime.now().strftime('%Y%m%d-%H%M')}.csv"
-    return _csv_response(rows, filename)
+    pdf = build_report_pdf(
+        title=REPORT_TITLES[tipo],
+        period_label=PERIOD_LABELS[periodo],
+        period_start=start,
+        period_end=end,
+        headers=rows[0],
+        rows=rows[1:],
+        col_ratios=REPORT_COL_RATIOS[tipo],
+    )
+    filename = f"reporte-{tipo}-{periodo}-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

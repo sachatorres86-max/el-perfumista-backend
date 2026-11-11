@@ -72,6 +72,15 @@ def get_active_quote_for_token(db: Session, token: str) -> Quote | None:
     )
 
 
+def get_latest_quote_for_token(db: Session, token: str) -> Quote | None:
+    return db.scalar(
+        select(Quote)
+        .where(Quote.source_token_hash == quote_token_hash(token))
+        .order_by(Quote.id.desc())
+        .limit(1)
+    )
+
+
 def confirm_quote(
     db: Session,
     token: str,

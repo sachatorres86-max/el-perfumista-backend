@@ -157,6 +157,12 @@ class SharedCartOut(BaseModel):
     total_cop: int | None = None
 
 
+class SharedCartStatusOut(BaseModel):
+    confirmada: bool
+    estado: QuoteStatus | None = None
+    quote_id: int | None = None
+
+
 # ---------------------------------------------------------------- cotizaciones
 
 

@@ -148,6 +148,42 @@ def test_confirm_rejects_invalid_token_and_insufficient_stock(
     assert _stock(db_session, presentation_id) == stock
 
 
+def test_shared_cart_status_reports_confirmation(
+    admin_client: TestClient, client: TestClient, db_session
+) -> None:
+    presentation_id, _ = _presentation_with_stock(db_session)
+    token = encode_cart_token([(presentation_id, 1)])
+
+    pending = client.get(f"/api/cotizaciones/{token}/estado")
+    assert pending.status_code == 200
+    assert pending.json() == {
+        "confirmada": False,
+        "estado": None,
+        "quote_id": None,
+    }
+
+    quote = admin_client.post(
+        "/api/admin/cotizaciones/confirmar", json={"token": token}
+    ).json()
+    confirmed = client.get(f"/api/cotizaciones/{token}/estado")
+    assert confirmed.status_code == 200
+    assert confirmed.json() == {
+        "confirmada": True,
+        "estado": "confirmada",
+        "quote_id": quote["id"],
+    }
+
+    admin_client.post(f"/api/admin/cotizaciones/{quote['id']}/cancelar")
+    cancelled = client.get(f"/api/cotizaciones/{token}/estado")
+    assert cancelled.json() == {
+        "confirmada": False,
+        "estado": "cancelada",
+        "quote_id": quote["id"],
+    }
+
+    assert client.get("/api/cotizaciones/no-es-un-token/estado").status_code == 404
+
+
 def test_anonymous_cannot_manage_quotes(client: TestClient) -> None:
     assert client.get("/api/admin/cotizaciones").status_code == 401
     assert client.post(

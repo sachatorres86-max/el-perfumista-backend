@@ -48,32 +48,31 @@ def test_reports_summary_requires_period(admin_client: TestClient) -> None:
     assert admin_client.get("/api/admin/reportes/resumen", params={"periodo": "anual"}).status_code == 422
 
 
-def test_csv_export(admin_client: TestClient) -> None:
+def test_pdf_export(admin_client: TestClient) -> None:
     response = admin_client.get(
         "/api/admin/reportes/export",
         params={"tipo": "inventario", "periodo": "mensual"},
     )
     assert response.status_code == 200
-    assert "text/csv" in response.headers["content-type"]
+    assert response.headers["content-type"] == "application/pdf"
     assert "attachment" in response.headers["content-disposition"]
-    assert ".csv" in response.headers["content-disposition"]
-
-    text = response.content.decode("utf-8-sig")
-    lines = text.strip().splitlines()
-    assert lines[0].startswith("Tipo;SKU;Nombre")
-    assert any(line.startswith("Producto;") for line in lines)
-    assert any(line.startswith("Insumo;") for line in lines)
+    assert ".pdf" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF-")
+    assert len(response.content) > 1000
 
 
-def test_csv_export_variants(admin_client: TestClient) -> None:
+def test_pdf_export_variants(admin_client: TestClient) -> None:
     for tipo in ("agotados", "stock_bajo", "movimientos", "cotizaciones"):
         response = admin_client.get(
             "/api/admin/reportes/export",
             params={"tipo": tipo, "periodo": "mensual"},
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.content.startswith(b"%PDF-")
         assert tipo in response.headers["content-disposition"]
         assert "mensual" in response.headers["content-disposition"]
+        assert ".pdf" in response.headers["content-disposition"]
 
     invalid = admin_client.get(
         "/api/admin/reportes/export",

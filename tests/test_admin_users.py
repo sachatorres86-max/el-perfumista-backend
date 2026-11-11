@@ -52,6 +52,20 @@ def test_create_user_validates_fields(admin_client: TestClient) -> None:
     assert _create_user(admin_client, role="superadmin").status_code == 422
 
 
+def test_create_user_only_allows_vendor_role(admin_client: TestClient) -> None:
+    admin = _create_user(
+        admin_client, email="otro-admin@correo.com", role="admin"
+    )
+    assert admin.status_code == 400
+    assert "vendedor" in admin.json()["detail"]
+
+    client = _create_user(
+        admin_client, email="otro-cliente@correo.com", role="cliente"
+    )
+    assert client.status_code == 400
+    assert "vendedor" in client.json()["detail"]
+
+
 def test_admin_cannot_deactivate_or_demote_self(admin_client: TestClient) -> None:
     me = admin_client.get("/api/auth/me").json()
 
@@ -71,26 +85,72 @@ def test_admin_cannot_deactivate_or_demote_self(admin_client: TestClient) -> Non
     assert rename.status_code == 200
 
 
-def test_admin_can_update_role_password_and_active(admin_client: TestClient) -> None:
-    created = _create_user(admin_client, role="cliente").json()
+def test_admin_cannot_change_any_user_role(admin_client: TestClient) -> None:
+    created = _create_user(admin_client).json()
+
+    for role in ("cliente", "admin"):
+        response = admin_client.put(
+            f"/api/admin/usuarios/{created['id']}", json={"role": role}
+        )
+        assert response.status_code == 400, response.text
+
+    unchanged = admin_client.put(
+        f"/api/admin/usuarios/{created['id']}", json={"role": "vendedor"}
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["role"] == "vendedor"
+
+
+def test_admin_cannot_reset_another_users_password(admin_client: TestClient) -> None:
+    created = _create_user(admin_client).json()
+
+    response = admin_client.put(
+        f"/api/admin/usuarios/{created['id']}",
+        json={"password": "NuevaClave2026!"},
+    )
+    assert response.status_code == 400, response.text
+    assert "tu propia cuenta" in response.json()["detail"]
+
+    login = admin_client.post(
+        "/api/auth/login",
+        json={"email": "usuario@correo.com", "password": "Usuario2026!"},
+    )
+    assert login.status_code == 200
+
+
+def test_admin_can_change_own_password(admin_client: TestClient) -> None:
+    me = admin_client.get("/api/auth/me").json()
+
+    response = admin_client.put(
+        f"/api/admin/usuarios/{me['id']}",
+        json={"password": "NuevaClave2026!"},
+    )
+    assert response.status_code == 200, response.text
+
+    login = admin_client.post(
+        "/api/auth/login",
+        json={"email": ADMIN_EMAIL, "password": "NuevaClave2026!"},
+    )
+    assert login.status_code == 200
+
+
+def test_admin_can_update_other_user_data_and_active(admin_client: TestClient) -> None:
+    created = _create_user(admin_client).json()
 
     updated = admin_client.put(
         f"/api/admin/usuarios/{created['id']}",
         json={
             "name": "Usuario Actualizado",
-            "role": "vendedor",
-            "password": "NuevaClave2026!",
             "active": False,
         },
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["name"] == "Usuario Actualizado"
-    assert updated.json()["role"] == "vendedor"
     assert updated.json()["active"] is False
 
     blocked = admin_client.post(
         "/api/auth/login",
-        json={"email": "usuario@correo.com", "password": "NuevaClave2026!"},
+        json={"email": "usuario@correo.com", "password": "Usuario2026!"},
     )
     assert blocked.status_code == 401
 
@@ -101,7 +161,7 @@ def test_admin_can_update_role_password_and_active(admin_client: TestClient) -> 
 
     login = admin_client.post(
         "/api/auth/login",
-        json={"email": "usuario@correo.com", "password": "NuevaClave2026!"},
+        json={"email": "usuario@correo.com", "password": "Usuario2026!"},
     )
     assert login.status_code == 200
     assert login.json()["role"] == "vendedor"
