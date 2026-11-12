@@ -119,6 +119,66 @@ def test_staff_sees_pending_orders_first_with_client_and_prices(
     assert pending_only.json()["items"][0]["id"] == first["id"]
 
 
+def test_client_tracks_only_own_orders_and_can_filter_by_status(
+    client: TestClient, db_session
+) -> None:
+    _register_client(client)
+    presentation_id, _ = _presentation_with_stock(db_session, minimum=2)
+    own_order = _place_order(client, presentation_id, 1).json()
+    second_order = _place_order(client, presentation_id, 1).json()
+
+    _login_staff(client)
+    confirmed = client.post(
+        f"/api/admin/cotizaciones/{second_order['id']}/confirmar"
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    cancelled = client.post(
+        f"/api/admin/cotizaciones/{second_order['id']}/cancelar"
+    )
+    assert cancelled.status_code == 200, cancelled.text
+
+    _register_client(client, email="otro-cliente@correo.com")
+    other_order = _place_order(client, presentation_id, 1).json()
+
+    orders = client.get("/api/cliente/pedidos")
+    assert orders.status_code == 200, orders.text
+    body = orders.json()
+    assert body["total"] == 1
+    assert [order["id"] for order in body["items"]] == [other_order["id"]]
+    assert body["items"][0]["status"] == "pendiente"
+    assert body["items"][0]["items"][0]["product_name"]
+
+    _login_staff(client)
+    client.post(f"/api/admin/cotizaciones/{own_order['id']}/confirmar")
+    _login_customer(client, "pedido@correo.com")
+
+    confirmed_orders = client.get(
+        "/api/cliente/pedidos", params={"estado": "confirmada"}
+    )
+    assert confirmed_orders.status_code == 200, confirmed_orders.text
+    assert [order["id"] for order in confirmed_orders.json()["items"]] == [
+        own_order["id"],
+    ]
+    assert confirmed_orders.json()["total"] == 1
+
+    cancelled_orders = client.get(
+        "/api/cliente/pedidos", params={"estado": "cancelada"}
+    )
+    assert cancelled_orders.status_code == 200, cancelled_orders.text
+    assert [order["id"] for order in cancelled_orders.json()["items"]] == [
+        second_order["id"]
+    ]
+
+
+def _login_customer(client: TestClient, email: str) -> None:
+    client.post("/api/auth/logout")
+    response = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": CLIENT_PASSWORD},
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_confirm_pending_order_discounts_stock_and_audits(
     client: TestClient, db_session
 ) -> None:

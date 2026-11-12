@@ -1,12 +1,21 @@
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+import math
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.core.deps import require_cliente
-from app.models import User
-from app.schemas import CartValidateIn, CartValidationOut, OrderCreateIn, OrderCreatedOut
+from app.models import Quote, User
+from app.schemas import (
+    CartValidateIn,
+    CartValidationOut,
+    OrderCreateIn,
+    OrderCreatedOut,
+    PaginatedQuotes,
+)
 from app.services.cart import normalize_cart_quantities, resolve_cart
-from app.services.quotes import create_order
+from app.services.quotes import create_order, expire_pending_orders, serialize_quote
 
 router = APIRouter(prefix="/api/cliente", tags=["cliente · carrito"])
 
@@ -49,4 +58,45 @@ def place_order(
         "total_units": quote.total_units,
         "created_at": quote.created_at,
         "expires_at": quote.expires_at,
+    }
+
+
+@router.get("/pedidos", response_model=PaginatedQuotes)
+def list_client_orders(
+    estado: str | None = Query(
+        default=None, pattern="^(pendiente|confirmada|cancelada)$"
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    client: User = Depends(require_cliente),
+) -> dict:
+    """Devuelve únicamente los pedidos del cliente autenticado."""
+    expire_pending_orders(db)
+
+    conditions = [Quote.client_id == client.id]
+    if estado:
+        conditions.append(Quote.status == estado)
+
+    total = db.scalar(select(func.count(Quote.id)).where(*conditions)) or 0
+    quotes = db.scalars(
+        select(Quote)
+        .where(*conditions)
+        .options(
+            selectinload(Quote.items),
+            selectinload(Quote.client),
+            selectinload(Quote.confirmed_by),
+            selectinload(Quote.cancelled_by),
+        )
+        .order_by(Quote.created_at.desc(), Quote.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    return {
+        "items": [serialize_quote(quote) for quote in quotes],
+        "total": total,
+        "page": page,
+        "pages": math.ceil(total / page_size) if total else 0,
+        "page_size": page_size,
     }
