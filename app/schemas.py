@@ -1,7 +1,8 @@
+import unicodedata
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models import (
     ItemType,
@@ -101,6 +102,17 @@ class ClientRegisterIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def sanitize_name(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = unicodedata.normalize("NFC", value)
+        cleaned = "".join(
+            char for char in normalized if char.isalpha() or char.isspace()
+        )
+        return " ".join(cleaned.split())
 
 
 class UserOut(ORMModel):

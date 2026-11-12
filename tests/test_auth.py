@@ -117,6 +117,29 @@ def test_register_creates_client_with_session(client: TestClient) -> None:
     assert me.json()["role"] == "cliente"
 
 
+def test_register_removes_non_letters_from_client_name(client: TestClient) -> None:
+    response = client.post(
+        "/api/auth/registro",
+        json={
+            "name": "María 123! Cliente",
+            "email": "maria@correo.com",
+            "password": "Cliente2026!",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["name"] == "María Cliente"
+
+    invalid = client.post(
+        "/api/auth/registro",
+        json={
+            "name": "123!?",
+            "email": "invalido@correo.com",
+            "password": "Cliente2026!",
+        },
+    )
+    assert invalid.status_code == 422
+
+
 def test_register_rejects_duplicate_email(client: TestClient) -> None:
     payload = {"name": "Cliente Uno", "email": "cliente@correo.com", "password": "Cliente2026!"}
     assert client.post("/api/auth/registro", json=payload).status_code == 201
