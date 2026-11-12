@@ -118,7 +118,13 @@ def register(payload: ClientRegisterIn, response: Response, db: Session = Depend
 
 @router.post("/logout", response_model=MessageOut)
 def logout(response: Response) -> MessageOut:
-    response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie(
+        COOKIE_NAME,
+        path="/",
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        httponly=True,
+    )
     return MessageOut(message="Sesión cerrada")
 
 
